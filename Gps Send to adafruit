@@ -50,6 +50,81 @@ while True:
         print("Program stopped")
         break
 
-    except Exception as error:
-        print(f"Error: {error}")
-        time.sleep(5)
+
+
+
+from sense_hat import SenseHat
+from time import time, sleep
+
+sense = SenseHat()
+
+# Colours
+red = (255, 0, 0)
+white = (255, 255, 255)
+green = (0, 255, 0)
+
+start = time()
+cancelled = False
+
+print("Emergency detected.")
+print("Press the Sense HAT joystick within 5 seconds to cancel.")
+
+# 5-second countdown
+while time() - start < 5:
+
+    sense.show_letter(
+        "!",
+        text_colour=red,
+        back_colour=white
+    )
+
+    for event in sense.stick.get_events():
+        if event.action == "pressed":
+            cancelled = True
+            print("Emergency cancelled.")
+            sense.clear()
+            break
+
+    if cancelled:
+        break
+
+    sleep(0.2)
+    sense.clear()
+    sleep(0.2)
+
+# If not cancelled after 5 seconds
+if not cancelled:
+
+    print("5 seconds elapsed.")
+    print("Sending emergency alert and GPS location...")
+
+    # >>> Send your Adafruit email/GPS alert here <<<
+    # Make sure this is only called ONCE
+
+    # Keep showing SOS until button is pressed
+    while not cancelled:
+
+        sense.show_message(
+            "SOS",
+            scroll_speed=0.05,
+            text_colour=red,
+            back_colour=(0, 0, 0)
+        )
+
+        # Check joystick after each scroll
+        for event in sense.stick.get_events():
+            if event.action == "pressed":
+                cancelled = True
+                print("Emergency cancelled.")
+                sense.show_message(
+                    "Emergency Cancelled",
+                    scroll_speed=0.05,
+                    text_colour=green
+                    
+                    ,
+                    back_colour=(0, 0, 0)
+        )
+                
+                break
+
+sense.clear()
