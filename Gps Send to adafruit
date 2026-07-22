@@ -1,0 +1,55 @@
+from gps import gps, WATCH_ENABLE
+from Adafruit_IO import Client, RequestError
+from datetime import datetime, timezone
+import time
+
+ADAFRUIT_IO_USERNAME = "Username"
+ADAFRUIT_IO_KEY = "aio key"
+
+aio = Client(ADAFRUIT_IO_USERNAME, ADAFRUIT_IO_KEY)
+location_feed = aio.feeds("location")
+
+session = gps(mode=WATCH_ENABLE)
+
+while True:
+    try:
+        report = session.next()
+
+        if report["class"] == "TPV":
+            if hasattr(report, "lat") and hasattr(report, "lon"):
+
+                latitude = report.lat
+                longitude = report.lon
+                elevation = getattr(report, "alt", 0)
+
+                print(f"Latitude : {latitude}")
+                print(f"Longitude: {longitude}")
+                print(f"Elevation: {elevation}")
+
+                metadata = {
+                    "lat": latitude,
+                    "lon": longitude,
+                    "ele": elevation,
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                }
+
+                aio.send_data(
+                    location_feed.key,
+                    "GPS",
+                    metadata
+                )
+
+                print("Location successfully sent to Adafruit IO")
+                time.sleep(10)
+
+    except RequestError as error:
+        print(f"Adafruit IO request error: {error}")
+        time.sleep(10)
+
+    except KeyboardInterrupt:
+        print("Program stopped")
+        break
+
+    except Exception as error:
+        print(f"Error: {error}")
+        time.sleep(5)
