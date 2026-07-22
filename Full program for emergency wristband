@@ -1,0 +1,668 @@
+from Adafruit_IO import Client, Feed, RequestError
+from sense_hat import SenseHat
+from gps import gps, WATCH_ENABLE
+from datetime import datetime, timezone
+from time import time, sleep
+
+# ---------------- ADAFRUIT IO ACCOUNT DETAILS ----------------
+
+ADAFRUIT_IO_USERNAME = "YOUR_USERNAME"
+ADAFRUIT_IO_KEY = "YOUR_IO_KEY"
+
+aio = Client(
+    ADAFRUIT_IO_USERNAME,
+    ADAFRUIT_IO_KEY
+)
+
+# ---------------- INITIALISE SENSE HAT ----------------
+
+sense = SenseHat()
+sense.clear()
+
+# Enable gyroscope and accelerometer
+sense.set_imu_config(False, True, True)
+
+# ---------------- INITIALISE GPS ----------------
+
+location_feed = aio.feeds("location")
+gps_session = gps(mode=WATCH_ENABLE)
+
+# ---------------- ADAFRUIT IO SENSOR FEEDS ----------------
+
+temperature_feed = aio.feeds("temperature")
+
+gyro_x_feed = aio.feeds("gyro-x")
+gyro_y_feed = aio.feeds("gyro-y")
+gyro_z_feed = aio.feeds("gyro-z")
+
+accel_x_feed = aio.feeds("accel-x")
+accel_y_feed = aio.feeds("accel-y")
+accel_z_feed = aio.feeds("accel-z")
+
+# ---------------- COLOURS ----------------
+
+red = (255, 0, 0)
+white = (255, 255, 255)
+green = (0, 255, 0)
+black = (0, 0, 0)
+
+# ---------------- SETTINGS ----------------
+
+# Prototype: no movement for 5 seconds
+INACTIVITY_TIME = 5
+
+# After warning appears, user has 5 seconds to respond
+RESPONSE_TIME = 5
+
+# Movement sensitivity
+ACCEL_CHANGE_LIMIT = 0.1
+GYRO_CHANGE_LIMIT = 5
+
+# Strong movement used for shake-to-cancel
+SHAKE_LIMIT = 0.5
+
+# Prototype temperature threshold
+TEMP_LIMIT = 35.0
+
+
+# ==========================================================
+# GPS FUNCTION
+# ==========================================================
+
+def send_gps_location():
+
+    print("Getting GPS location...")
+
+    gps_start = time()
+
+    # Try to obtain GPS location for up to 15 seconds
+    while time() - gps_start < 15:
+
+        try:
+
+            report = gps_session.next()
+
+            if report["class"] == "TPV":
+
+                if (
+                    hasattr(report, "lat")
+                    and hasattr(report, "lon")
+                ):
+
+                    latitude = report.lat
+                    longitude = report.lon
+                    elevation = getattr(
+                        report,
+                        "alt",
+                        0
+                    )
+
+                    print(
+                        "Latitude:",
+                        latitude
+                    )
+
+                    print(
+                        "Longitude:",
+                        longitude
+                    )
+
+                    print(
+                        "Elevation:",
+                        elevation
+                    )
+
+                    metadata = {
+                        "lat": latitude,
+                        "lon": longitude,
+                        "ele": elevation,
+                        "created_at":
+                            datetime.now(
+                                timezone.utc
+                            ).isoformat()
+                    }
+
+                    aio.send_data(
+                        location_feed.key,
+                        "GPS",
+                        metadata
+                    )
+
+                    print(
+                        "Location successfully "
+                        "sent to Adafruit IO"
+                    )
+
+                    # Stop after location is sent once
+                    return True
+
+        except RequestError as error:
+
+            print(
+                "Adafruit IO request error:",
+                error
+            )
+
+            return False
+
+        except Exception as error:
+
+            print(
+                "GPS error:",
+                error
+            )
+
+            return False
+
+    print("GPS location could not be obtained.")
+
+    return False
+
+
+# ==========================================================
+# INITIAL SENSOR VALUES
+# ==========================================================
+
+previous_gyro = sense.get_gyroscope()
+
+previous_pitch = previous_gyro["pitch"]
+previous_roll = previous_gyro["roll"]
+previous_yaw = previous_gyro["yaw"]
+
+previous_acceleration = (
+    sense.get_accelerometer_raw()
+)
+
+previous_x = previous_acceleration["x"]
+previous_y = previous_acceleration["y"]
+previous_z = previous_acceleration["z"]
+
+# Start inactivity timer
+last_movement_time = time()
+
+
+# ==========================================================
+# MAIN PROGRAM
+# ==========================================================
+
+while True:
+
+    try:
+
+        # ---------------- TEMPERATURE ----------------
+
+        temp = sense.get_temperature()
+        temperature = round(temp, 1)
+
+        print(
+            "Temperature =",
+            temperature,
+            "*C"
+        )
+
+
+        # ---------------- GYROSCOPE ----------------
+
+        gyro = sense.get_gyroscope()
+
+        gyro_x = round(
+            gyro["pitch"],
+            2
+        )
+
+        gyro_y = round(
+            gyro["roll"],
+            2
+        )
+
+        gyro_z = round(
+            gyro["yaw"],
+            2
+        )
+
+        print("Gyroscope")
+
+        print(
+            "X:",
+            gyro_x,
+            "Y:",
+            gyro_y,
+            "Z:",
+            gyro_z
+        )
+
+
+        # ---------------- ACCELEROMETER ----------------
+
+        acceleration = (
+            sense.get_accelerometer_raw()
+        )
+
+        accel_x = round(
+            acceleration["x"],
+            2
+        )
+
+        accel_y = round(
+            acceleration["y"],
+            2
+        )
+
+        accel_z = round(
+            acceleration["z"],
+            2
+        )
+
+        print("Accelerometer")
+
+        print(
+            "X:",
+            accel_x,
+            "Y:",
+            accel_y,
+            "Z:",
+            accel_z
+        )
+
+
+        # ---------------- CALCULATE MOVEMENT ----------------
+
+        x_change = abs(
+            accel_x - previous_x
+        )
+
+        y_change = abs(
+            accel_y - previous_y
+        )
+
+        z_change = abs(
+            accel_z - previous_z
+        )
+
+        pitch_change = abs(
+            gyro_x - previous_pitch
+        )
+
+        roll_change = abs(
+            gyro_y - previous_roll
+        )
+
+        yaw_change = abs(
+            gyro_z - previous_yaw
+        )
+
+
+        movement_detected = (
+
+            x_change > ACCEL_CHANGE_LIMIT
+
+            or y_change > ACCEL_CHANGE_LIMIT
+
+            or z_change > ACCEL_CHANGE_LIMIT
+
+            or pitch_change > GYRO_CHANGE_LIMIT
+
+            or roll_change > GYRO_CHANGE_LIMIT
+
+            or yaw_change > GYRO_CHANGE_LIMIT
+        )
+
+
+        # ---------------- INACTIVITY CHECK ----------------
+
+        if movement_detected:
+
+            last_movement_time = time()
+
+            print(
+                "Movement detected - "
+                "inactivity timer reset"
+            )
+
+        else:
+
+            inactive_time = (
+                time() - last_movement_time
+            )
+
+            print(
+                "No significant movement for:",
+                round(inactive_time),
+                "seconds"
+            )
+
+
+        # ---------------- ABNORMAL CONDITIONS ----------------
+
+        inactivity_abnormal = (
+
+            time() - last_movement_time
+            >= INACTIVITY_TIME
+        )
+
+        temperature_abnormal = (
+
+            temperature >= TEMP_LIMIT
+        )
+
+
+        if (
+            inactivity_abnormal
+            or temperature_abnormal
+        ):
+
+            print("")
+            print(
+                "ABNORMAL CONDITION DETECTED"
+            )
+
+            if inactivity_abnormal:
+
+                print(
+                    "No movement detected "
+                    "for 5 seconds"
+                )
+
+            if temperature_abnormal:
+
+                print(
+                    "Abnormal temperature detected"
+                )
+
+            # ==================================================
+            # SOS WARNING
+            # ==================================================
+
+            warning_start = time()
+
+            cancelled = False
+            help_requested = False
+
+            print("")
+            print(
+                "Shake wristband if "
+                "assistance is NOT needed."
+            )
+
+            print(
+                "Press joystick/button "
+                "if immediate help is needed."
+            )
+
+            print(
+                "No response within 5 seconds "
+                "= automatic SOS."
+            )
+
+
+            while (
+                time() - warning_start
+                < RESPONSE_TIME
+            ):
+
+                # Flash warning symbol
+                sense.show_letter(
+                    "!",
+                    text_colour=red,
+                    back_colour=white
+                )
+
+                sleep(0.2)
+
+                sense.clear()
+
+                sleep(0.2)
+
+
+                # ---------------- SHAKE DETECTION ----------------
+
+                current_acceleration = (
+                    sense.get_accelerometer_raw()
+                )
+
+                current_x = (
+                    current_acceleration["x"]
+                )
+
+                current_y = (
+                    current_acceleration["y"]
+                )
+
+                current_z = (
+                    current_acceleration["z"]
+                )
+
+                shake_x = abs(
+                    current_x - accel_x
+                )
+
+                shake_y = abs(
+                    current_y - accel_y
+                )
+
+                shake_z = abs(
+                    current_z - accel_z
+                )
+
+                shake_detected = (
+
+                    shake_x > SHAKE_LIMIT
+
+                    or shake_y > SHAKE_LIMIT
+
+                    or shake_z > SHAKE_LIMIT
+                )
+
+
+                # ---------------- SHAKE = CANCEL ----------------
+
+                if shake_detected:
+
+                    cancelled = True
+
+                    print("")
+                    print(
+                        "Wristband shaken."
+                    )
+
+                    print(
+                        "Emergency cancelled."
+                    )
+
+                    sense.show_message(
+                        "Emergency Cancelled",
+                        scroll_speed=0.05,
+                        text_colour=green,
+                        back_colour=black
+                    )
+
+                    sense.clear()
+
+                    # Reset timer
+                    last_movement_time = time()
+
+                    break
+
+
+                # ---------------- BUTTON = GET HELP ----------------
+
+                for event in (
+                    sense.stick.get_events()
+                ):
+
+                    if event.action == "pressed":
+
+                        help_requested = True
+
+                        print("")
+                        print(
+                            "Emergency button "
+                            "pressed."
+                        )
+
+                        print(
+                            "Sending emergency alert "
+                            "and GPS location..."
+                        )
+
+                        # Send GPS once
+                        send_gps_location()
+
+                        break
+
+
+                if help_requested:
+
+                    break
+
+
+            # ==================================================
+            # AFTER RESPONSE WINDOW
+            # ==================================================
+
+            if cancelled:
+
+                # Go back to normal monitoring
+                pass
+
+
+            elif help_requested:
+
+                print("SOS ACTIVE")
+
+                sense.show_message(
+                    "SOS",
+                    scroll_speed=0.05,
+                    text_colour=red,
+                    back_colour=black
+                )
+
+                sense.clear()
+
+                # Reset so prototype can continue
+                last_movement_time = time()
+
+
+            else:
+
+                # ---------------- NO RESPONSE ----------------
+
+                print("")
+                print(
+                    "5 seconds elapsed."
+                )
+
+                print(
+                    "No response detected."
+                )
+
+                print(
+                    "Sending emergency alert "
+                    "and GPS location automatically..."
+                )
+
+                # Send GPS automatically
+                send_gps_location()
+
+                sense.show_message(
+                    "SOS",
+                    scroll_speed=0.05,
+                    text_colour=red,
+                    back_colour=black
+                )
+
+                sense.clear()
+
+                # Reset prototype
+                last_movement_time = time()
+
+
+        # ---------------- SEND SENSOR DATA TO ADAFRUIT ----------------
+
+        aio.send_data(
+            temperature_feed.key,
+            temperature
+        )
+
+        aio.send_data(
+            gyro_x_feed.key,
+            gyro_x
+        )
+
+        aio.send_data(
+            gyro_y_feed.key,
+            gyro_y
+        )
+
+        aio.send_data(
+            gyro_z_feed.key,
+            gyro_z
+        )
+
+        aio.send_data(
+            accel_x_feed.key,
+            accel_x
+        )
+
+        aio.send_data(
+            accel_y_feed.key,
+            accel_y
+        )
+
+        aio.send_data(
+            accel_z_feed.key,
+            accel_z
+        )
+
+        print(
+            "Data sent to Adafruit IO"
+        )
+
+        print(
+            "-------------------------"
+        )
+
+
+        # ---------------- SAVE CURRENT VALUES ----------------
+
+        previous_x = accel_x
+        previous_y = accel_y
+        previous_z = accel_z
+
+        previous_pitch = gyro_x
+        previous_roll = gyro_y
+        previous_yaw = gyro_z
+
+
+        sleep(1)
+
+
+    except KeyboardInterrupt:
+
+        print(
+            "Program stopped."
+        )
+
+        sense.clear()
+
+        break
+
+
+    except RequestError as error:
+
+        print(
+            "Adafruit IO request error:",
+            error
+        )
+
+        sleep(5)
+
+
+    except Exception as error:
+
+        print(
+            "Error:",
+            error
+        )
+
+        sleep(5)
