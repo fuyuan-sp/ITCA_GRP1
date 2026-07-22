@@ -2,7 +2,7 @@ from gps import gps, WATCH_ENABLE
 from Adafruit_IO import Client, RequestError
 from datetime import datetime, timezone
 import time
-
+#adafruit key
 ADAFRUIT_IO_USERNAME = "Username"
 ADAFRUIT_IO_KEY = "aio key"
 
@@ -22,9 +22,9 @@ while True:
                 longitude = report.lon
                 elevation = getattr(report, "alt", 0)
 
-                print(f"Latitude : {latitude}")
-                print(f"Longitude: {longitude}")
-                print(f"Elevation: {elevation}")
+                print(f"Latitude : {latitude}") #show latitude
+                print(f"Longitude: {longitude}") #show longitude
+                print(f"Elevation: {elevation}") #show elevation
 
                 metadata = {
                     "lat": latitude,
